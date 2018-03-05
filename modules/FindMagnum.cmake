@@ -59,6 +59,7 @@
 #  Text                         - Text library
 #  TextureTools                 - TextureTools library
 #  Trade                        - Trade library
+#  Vk                           - Vk library
 #  GlfwApplication              - GLFW application
 #  GlutApplication              - GLUT application
 #  GlxApplication               - GLX application
@@ -85,6 +86,7 @@
 #  fontconverter                - magnum-fontconverter executable
 #  imageconverter               - magnum-imageconverter executable
 #  gl-info                      - magnum-gl-info executable
+#  vk-info                      - magnum-vk-info executable
 #  al-info                      - magnum-al-info executable
 #
 # Example usage with specifying additional components is::
@@ -128,6 +130,7 @@
 #   emulation on desktop OpenGL
 #  MAGNUM_TARGET_WEBGL          - Defined if compiled for WebGL
 #  MAGNUM_TARGET_HEADLESS       - Defined if compiled for headless machines
+#  MAGNUM_TARGET_VK             - Defined if compiled with Vulkan interop
 #
 # Additionally these variables are defined for internal usage:
 #
@@ -255,7 +258,8 @@ set(_magnumFlags
     TARGET_GLES3
     TARGET_DESKTOP_GLES
     TARGET_WEBGL
-    TARGET_HEADLESS)
+    TARGET_HEADLESS
+    TARGET_VK)
 foreach(_magnumFlag ${_magnumFlags})
     string(FIND "${_magnumConfigure}" "#define MAGNUM_${_magnumFlag}" _magnum_${_magnumFlag})
     if(NOT _magnum_${_magnumFlag} EQUAL -1)
@@ -332,7 +336,7 @@ endif()
 # components from other repositories)
 set(_MAGNUM_LIBRARY_COMPONENT_LIST
     Audio DebugTools GL MeshTools Primitives SceneGraph Shaders Shapes Text
-    TextureTools Trade
+    TextureTools Trade Vk
     AndroidApplication GlfwApplication GlutApplication GlxApplication
     Sdl2Application XEglApplication WindowlessCglApplication
     WindowlessEglApplication WindowlessGlxApplication WindowlessIosApplication WindowlessWglApplication WindowlessWindowsEglApplication
@@ -343,7 +347,8 @@ set(_MAGNUM_PLUGIN_COMPONENT_LIST
     MagnumFont MagnumFontConverter ObjImporter TgaImageConverter TgaImporter
     WavAudioImporter)
 set(_MAGNUM_EXECUTABLE_COMPONENT_LIST
-    distancefieldconverter fontconverter imageconverter gl-info al-info)
+    distancefieldconverter fontconverter imageconverter gl-info vk-info
+    al-info)
 
 # Inter-component dependencies
 set(_MAGNUM_Audio_DEPENDENCIES )
@@ -734,6 +739,15 @@ foreach(_component ${Magnum_FIND_COMPONENTS})
         elseif(_component STREQUAL Trade)
             set_property(TARGET Magnum::${_component} APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES Corrade::PluginManager)
+
+        # Vk library
+        elseif(_component STREQUAL Vk)
+            set(Vulkan_INCLUDE_DIR ${MAGNUM_INCLUDE_DIR}/MagnumExternal/Vulkan)
+            find_package(Vulkan REQUIRED)
+            set_property(TARGET Magnum::${_component} APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES Vulkan::Vulkan)
+            set_property(TARGET Magnum::${_component} PROPERTY
+                INTERFACE_CORRADE_CXX_STANDARD 14)
         endif()
 
         # No special setup for AnyAudioImporter plugin
