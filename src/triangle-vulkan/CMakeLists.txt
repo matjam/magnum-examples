@@ -29,7 +29,9 @@
 
 cmake_minimum_required(VERSION 3.7)
 
-find_package(Magnum REQUIRED Vk)
+find_package(Magnum REQUIRED Trade Vk)
 
 add_executable(magnum-triangle-vulkan main.cpp)
-target_link_libraries(magnum-triangle-vulkan PRIVATE Magnum::Vk)
+target_link_libraries(magnum-triangle-vulkan PRIVATE
+    Magnum::Trade
+    Magnum::Vk)

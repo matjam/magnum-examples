@@ -1,37 +1,10 @@
-/*
-    This file is part of Magnum.
-
-    Original authors — credit is appreciated but not required:
-
-        2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018 —
-            Vladimír Vondruš <mosra@centrum.cz>
-
-    This is free and unencumbered software released into the public domain.
-
-    Anyone is free to copy, modify, publish, use, compile, sell, or distribute
-    this software, either in source code form or as a compiled binary, for any
-    purpose, commercial or non-commercial, and by any means.
-
-    In jurisdictions that recognize copyright laws, the author or authors of
-    this software dedicate any and all copyright interest in the software to
-    the public domain. We make this dedication for the benefit of the public
-    at large and to the detriment of our heirs and successors. We intend this
-    dedication to be an overt act of relinquishment in perpetuity of all
-    present and future rights to this software under copyright law.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-    THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-    IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 #include <Corrade/Utility/Assert.h>
-#include <Corrade/Utility/Directory.h>
-#include <Corrade/Utility/System.h>
+#include <Corrade/PluginManager/Manager.h>
 #include <Magnum/Magnum.h>
+#include <Magnum/GL/ImageView.h>
+#include <Magnum/GL/PixelFormat.h>
 #include <Magnum/Math/Color.h>
+#include <Magnum/Trade/AbstractImageConverter.h>
 #include <MagnumExternal/Vulkan/flextVk.h>
 
 #include "spirv.h"
@@ -63,8 +36,8 @@ int main() {
     }
     flextVkInitInstance(instance);
 
-    /* Hardcoded memory tyoe index */
-    constexpr UnsignedInt MemoryTypeIndex = 10;
+    /* Hardcoded memory type index (yes, I'm cheating) */
+    constexpr UnsignedInt MemoryTypeIndex = 0;
 
     /* Create a device */
     VkPhysicalDevice physicalDevice;
@@ -91,7 +64,7 @@ int main() {
         CORRADE_INTERNAL_ASSERT(properties.memoryTypeCount >= 1);
         CORRADE_INTERNAL_ASSERT(properties.memoryHeapCount >= 1);
         CORRADE_INTERNAL_ASSERT(properties.memoryTypes[MemoryTypeIndex].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-//         CORRADE_INTERNAL_ASSERT(properties.memoryTypes[MemoryTypeIndex].heapIndex == 0);
+        CORRADE_INTERNAL_ASSERT(properties.memoryTypes[MemoryTypeIndex].heapIndex == 0);
     }
     VkDevice device;
     {
@@ -132,13 +105,6 @@ int main() {
         MAGNUM_VK_ASSERT_OUTPUT(vkAllocateCommandBuffers(device, &info, &commandBuffer));
     }
 
-    /* Begin recording */
-    {
-        VkCommandBufferBeginInfo info{};
-        info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        MAGNUM_VK_ASSERT_OUTPUT(vkBeginCommandBuffer(commandBuffer, &info));
-    }
-
     /* Render pass */
     VkRenderPass renderPass;
     {
@@ -173,24 +139,21 @@ int main() {
         VkImageCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         info.imageType = VK_IMAGE_TYPE_2D;
-        info.format = VK_FORMAT_R8G8B8A8_UNORM;
-        info.extent = {32, 32, 1};
+        info.format = VK_FORMAT_R8G8B8A8_SRGB;
+        info.extent = {800, 600, 1};
         info.mipLevels = 1;
         info.arrayLayers = 1;
         info.samples = VK_SAMPLE_COUNT_1_BIT;
-        info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        info.tiling = VK_IMAGE_TILING_LINEAR;
         info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        UnsignedInt zero = 0;
-        info.queueFamilyIndexCount = 1;
-        info.pQueueFamilyIndices = &zero;
         MAGNUM_VK_ASSERT_OUTPUT(vkCreateImage(device, &info, nullptr, &image));
     }
     VkDeviceMemory imageMemory;
     {
         VkMemoryRequirements requirements;
         vkGetImageMemoryRequirements(device, image, &requirements);
-        CORRADE_INTERNAL_ASSERT(requirements.size == 32*32*4);
+        CORRADE_INTERNAL_ASSERT(requirements.size == 800*600*4);
 
         VkMemoryAllocateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -238,7 +201,7 @@ int main() {
 
         /* Fill the data */
         void* data;
-        MAGNUM_VK_ASSERT_OUTPUT(vkMapMemory(device, imageMemory, 0, VK_WHOLE_SIZE, 0, &data));
+        MAGNUM_VK_ASSERT_OUTPUT(vkMapMemory(device, bufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
         auto view = Containers::arrayCast<Vector4>(Containers::arrayView(static_cast<char*>(data), 3*2*4*4));
         view[0] = {-0.5f, -0.5f, 0.0f, 1.0f}; /* Left vertex, red color */
         view[1] = 0xff0000ff_srgbaf;
@@ -246,7 +209,7 @@ int main() {
         view[3] = 0x00ff00ff_srgbaf;
         view[4] = { 0.0f,  0.5f, 0.0f, 1.0f}; /* Top vertex, blue color */
         view[5] = 0x0000ffff_srgbaf;
-        vkUnmapMemory(device, imageMemory);
+        vkUnmapMemory(device, bufferMemory);
     }
 
     /* Framebuffer */
@@ -257,28 +220,10 @@ int main() {
         info.renderPass = renderPass;
         info.attachmentCount = 1;
         info.pAttachments = &color;
-        info.width = 32;
-        info.height = 32;
+        info.width = 800;
+        info.height = 600;
         info.layers = 1;
         MAGNUM_VK_ASSERT_OUTPUT(vkCreateFramebuffer(device, &info, nullptr, &framebuffer));
-    }
-
-    /* Convert the image to the proper layout */
-    {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
     /* Create the shader */
@@ -393,11 +338,11 @@ int main() {
         inputAssemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
         VkViewport viewport{};
-        viewport.width = 32.0f;
-        viewport.height = 32.0f;
+        viewport.width = 800.0f;
+        viewport.height = 600.0f;
         viewport.maxDepth = 1.0f;
 
-        VkRect2D scissor{{}, {32, 32}};
+        VkRect2D scissor{{}, {800, 600}};
 
         VkPipelineViewportStateCreateInfo viewportInfo{};
         viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -451,13 +396,38 @@ int main() {
         MAGNUM_VK_ASSERT_OUTPUT(vkCreateGraphicsPipelines(device, nullptr, 1, &info, nullptr, &pipeline));
     }
 
+    /* Begin recording */
+    {
+        VkCommandBufferBeginInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        MAGNUM_VK_ASSERT_OUTPUT(vkBeginCommandBuffer(commandBuffer, &info));
+    }
+
+    /* Convert the image to the proper layout */
+    {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
     /* Begin a render pass, set up clear color */
     {
         VkRenderPassBeginInfo info{};
         info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         info.renderPass = renderPass;
         info.framebuffer = framebuffer;
-        info.renderArea = VkRect2D{{}, {32, 32}};
+        info.renderArea = VkRect2D{{}, {800, 600}};
         info.clearValueCount = 1;
         const Color4 color = 0x1f1f1f_srgbf;
         info.pClearValues = reinterpret_cast<const VkClearValue*>(&color);
@@ -478,25 +448,6 @@ int main() {
 
     /* End a render pass */
     vkCmdEndRenderPass(commandBuffer);
-
-    /* Convert the image to the proper layout */
-    {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
 
     /* End recording */
     MAGNUM_VK_ASSERT_OUTPUT(vkEndCommandBuffer(commandBuffer));
@@ -525,7 +476,14 @@ int main() {
     {
         void* data;
         MAGNUM_VK_ASSERT_OUTPUT(vkMapMemory(device, imageMemory, 0, VK_WHOLE_SIZE, 0, &data));
-        Debug{} << Containers::arrayCast<Color4ub>(Containers::arrayView(static_cast<char*>(data), 32*32*4));
+
+        ImageView2D image{PixelFormat::RGBA, PixelType::UnsignedByte, {800, 600}, Containers::arrayView(static_cast<char*>(data), 800*600*4)};
+        PluginManager::Manager<Trade::AbstractImageConverter> manager{"/usr/lib/magnum-d/imageconverters"};
+        auto converter = manager.loadAndInstantiate("AnyImageConverter");
+        CORRADE_INTERNAL_ASSERT(converter);
+        converter->exportToFile(image, "image.png");
+        Debug{} << "Saved an image to image.png";
+
         vkUnmapMemory(device, imageMemory);
     }
 
