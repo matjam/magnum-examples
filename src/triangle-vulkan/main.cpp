@@ -1,11 +1,12 @@
 #include <Corrade/Utility/Assert.h>
 #include <Corrade/PluginManager/Manager.h>
 #include <Magnum/Magnum.h>
-#include <Magnum/GL/ImageView.h>
-#include <Magnum/GL/PixelFormat.h>
+#include <Magnum/ImageView.h>
+#include <Magnum/PixelFormat.h>
 #include <Magnum/Math/Color.h>
 #include <Magnum/Trade/AbstractImageConverter.h>
 #include <MagnumExternal/Vulkan/flextVk.h>
+#include <MagnumExternal/Vulkan/flextVkGlobal.h>
 
 #include "spirv.h"
 
@@ -34,7 +35,7 @@ int main() {
         info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         MAGNUM_VK_ASSERT_OUTPUT(vkCreateInstance(&info, nullptr, &instance));
     }
-    flextVkInitInstance(instance);
+    flextVkInitInstance(instance, &flextVkInstance);
 
     /* Hardcoded memory type index (yes, I'm cheating) */
     constexpr UnsignedInt MemoryTypeIndex = 0;
@@ -82,6 +83,8 @@ int main() {
         info.pQueueCreateInfos = &queueInfo;
         MAGNUM_VK_ASSERT_OUTPUT(vkCreateDevice(physicalDevice, &info, nullptr, &device));
     }
+
+    flextVkInitDevice(device, &flextVkDevice, vkGetDeviceProcAddr);
 
     /* Create a queue */
     VkQueue queue;
@@ -477,8 +480,8 @@ int main() {
         void* data;
         MAGNUM_VK_ASSERT_OUTPUT(vkMapMemory(device, imageMemory, 0, VK_WHOLE_SIZE, 0, &data));
 
-        ImageView2D image{PixelFormat::RGBA, PixelType::UnsignedByte, {800, 600}, Containers::arrayView(static_cast<char*>(data), 800*600*4)};
-        PluginManager::Manager<Trade::AbstractImageConverter> manager{"/usr/lib/magnum-d/imageconverters"};
+        ImageView2D image{PixelFormat::RGBA8Unorm, {800, 600}, Containers::arrayView(static_cast<char*>(data), 800*600*4)};
+        PluginManager::Manager<Trade::AbstractImageConverter> manager;
         auto converter = manager.loadAndInstantiate("AnyImageConverter");
         CORRADE_INTERNAL_ASSERT(converter);
         converter->exportToFile(image, "image.png");
